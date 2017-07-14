@@ -31,7 +31,12 @@ set(LIBCSV_DIR "" CACHE PATH "Path to libcsv header and library")
 set(DO_PROFILING False CACHE BOOL "Collect some stats during execution - doesn't add much overhead")
 set(DO_MEMORY_PROFILING False CACHE BOOL "Collect memory consumption in parts of the combine gVCF program - high overhead")
 set(GENOMICSDB_MAVEN_BUILD_DIR ${CMAKE_BINARY_DIR}/target CACHE PATH "Path to maven build directory")
+set(LIBDBI_DIR "" CACHE PATH "Path to libdbi install directory")
 set(MAVEN_QUIET False CACHE BOOL "Do not print mvn messages")
+
+#See https://cmake.org/Wiki/CMake_RPATH_handling#Common_questions
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH True)
+enable_testing()
 
 #Platform check modules
 include(CheckIncludeFileCXX)
@@ -104,6 +109,13 @@ include_directories(${TILEDB_INCLUDE_DIR})
 #librt
 find_library(LIBRT_LIBRARY rt)
 
+#pgsql driver and dbi libs
+find_package(libdbi)
+if(LIBDBI_FOUND)
+    include_directories(${LIBDBI_INCLUDE_DIR})
+    add_definitions(-DLIBDBI)
+endif()
+
 #Protobuf library
 find_package(ProtobufWrapper REQUIRED)
 include_directories(${PROTOBUF_INCLUDE_DIRS})
@@ -170,10 +182,11 @@ include_directories (
     src/main/cpp/include/query_operations
     src/main/cpp/include/utils
     src/main/cpp/include/vcf
+    src/test/cpp/include
 )
 
-function(build_GenomicsDB_executable target)
-    add_executable(${target} src/${target}.cc)
+function(build_GenomicsDB_executable_common target)
+    #add_executable(${target} src/${target}.cc)
     if(TILEDB_SOURCE_DIR)
         add_dependencies(${target} TileDB)
     endif()
@@ -184,11 +197,19 @@ function(build_GenomicsDB_executable target)
     if(LIBCSV_FOUND)
         target_link_libraries(${target} ${LIBCSV_LIBRARY})
     endif()
-    target_link_libraries(${target} ${OPENSSL_LIBRARIES} ${ZLIB_LIBRARIES} ${PROTOBUF_LIBRARIES})
+    if(LIBDBI_FOUND)
+        target_link_libraries(${target} ${LIBPGSQL_DRIVER_LIBRARY} ${LIBDBI_DEV_LIBRARY})
+    endif()
     if(LIBRT_LIBRARY)
         target_link_libraries(${target} ${LIBRT_LIBRARY})
     endif()
+    target_link_libraries(${target} ${PROTOBUF_LIBRARIES} ${OPENSSL_LIBRARIES} ${ZLIB_LIBRARIES})
     install(TARGETS ${target} RUNTIME DESTINATION bin)
+endfunction()
+
+function(build_GenomicsDB_executable target)
+    add_executable(${target} src/${target}.cc)
+    build_GenomicsDB_executable_common(${target})
 endfunction()
 
 add_subdirectory(src)
@@ -196,7 +217,6 @@ include_directories(${PROTOBUF_GENERATED_CXX_HDRS_INCLUDE_DIRS})
 add_subdirectory(tools)
 add_subdirectory(example)
 
-enable_testing()
 if(BUILD_JAVA)
     set(JAVA_SCALA_SOURCES
         ./src/main/java/com/intel/genomicsdb/GenomicsDBConfiguration.java
@@ -275,4 +295,5 @@ if(BUILD_JAVA)
         COMMAND /usr/bin/python ${CMAKE_SOURCE_DIR}/tests/run.py
         ${CMAKE_BINARY_DIR}
         ${CMAKE_INSTALL_PREFIX})
+
 endif()
